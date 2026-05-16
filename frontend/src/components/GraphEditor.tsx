@@ -442,8 +442,9 @@ function EditorContent({ onBack }: EditorProps) {
                   <div className="h-full flex flex-col">
                     <div className="flex justify-between items-center mb-4">
                       <div className="relative">
-                        <button className="flex items-center gap-2 text-xs font-bold text-white bg-slate-800 px-3 py-1.5 rounded-lg border border-white/10 hover:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all" 
+                        <button className={`flex items-center gap-2 text-xs font-bold text-white bg-slate-800 px-3 py-1.5 rounded-lg border border-white/10 hover:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all ${isRegeneratingCode? 'opacity-50':'opacity-100'}`}
                           onClick={() => setshowLanguageDropDown(p => !p)}
+                          disabled={isRegeneratingCode}
                         >
                           {codeLanguage} 
                           <ChevronDown size={12} className={`transition-transform ${showLanguageDropDown ? 'rotate-180' : ''}`} />
