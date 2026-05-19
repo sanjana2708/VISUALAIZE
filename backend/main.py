@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import re
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +10,32 @@ from google.api_core import exceptions as google_exceptions
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# --- UTILITY FUNCTION: Safe JSON Parser ---
+def parse_json_response(response_text: str):
+    """
+    Safely parse JSON from LLM response, handling markdown code blocks.
+    
+    Only unwraps if the ENTIRE response is a fenced block to avoid breaking
+    valid JSON that contains backticks in field values (e.g., code_snippet).
+    
+    Handles cases like:
+    - ```json\n{...}\n```
+    - ```\n{...}\n```
+    - {raw JSON with "field": "```code```"}
+    """
+    response_text = response_text.strip()
+    
+    # Only unwrap if the entire response is wrapped in backticks
+    # This prevents breaking JSON with backticks in field values
+    if response_text.startswith('```') and response_text.endswith('```'):
+        # Remove opening fence and any optional Markdown info string (json, JSON, js, etc.)
+        response_text = re.sub(r'^```[^\n]*\n?', '', response_text)
+        # Remove closing fence (```)
+        response_text = re.sub(r'\s*```$', '', response_text)
+        response_text = response_text.strip()
+    
+    return json.loads(response_text)
 
 # --- 1. SETUP API KEY ---
 GENAI_KEY = os.getenv("GEMINI_API_KEY")
@@ -178,6 +205,7 @@ async def generate_graph(request: GraphRequest):
             status_code=400,
             detail="GEMINI_BAD_REQUEST: The AI visualization model failed to output structured JSON. This usually occurs if the prompt contains invalid commands, malicious requests, or is outside the scope of system visualization, resulting in a refusal or malformed output."
         )
+        return parse_json_response(response_text)
     except Exception as e:
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

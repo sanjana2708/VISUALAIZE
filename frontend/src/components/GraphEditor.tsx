@@ -1,12 +1,6 @@
 // frontend/src/components/GraphEditor.tsx
 'use client';
 
-import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import ReactFlow, { 
-  Background, BackgroundVariant, Controls, MiniMap, applyEdgeChanges, applyNodeChanges, 
-  Node, Edge, OnNodesChange, OnEdgesChange, MarkerType, useReactFlow, ReactFlowProvider
-} from 'reactflow';
-import 'reactflow/dist/style.css';
 import { toPng } from 'html-to-image';
 import { getLayoutedElements } from '../utils/layout'; 
 import { 
@@ -15,10 +9,26 @@ import {
   Globe, Mic, Download, ChevronDown, MessageSquare, Send, Paperclip, 
   PanelRightClose, PanelRightOpen, AlertTriangle, ArrowRight, X 
 } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactFlow, {
+  applyEdgeChanges, applyNodeChanges,
+  Background, BackgroundVariant, Controls,
+  Edge,
+  MarkerType,
+  MiniMap,
+  Node,
+  OnEdgesChange,
+  OnNodesChange,
+  ReactFlowProvider,
+  useReactFlow
+} from 'reactflow';
+import 'reactflow/dist/style.css';
 import CustomNode from '../components/CustomNode';
-import LoadingCore from './LoadingCore'; 
+import { getLayoutedElements } from '../utils/layout';
 import HolographicScene from './HolographicScene';
 import ErrorModal from './ErrorModal';
+import LoadingCore from './LoadingCore';
+import LoadingOverlay from './LoadingOverlay';
 
 interface EditorProps { onBack: () => void; }
 
@@ -33,6 +43,11 @@ interface GraphData {
   code_explanation?: string;
   nodes: { id: string; label: string }[];
   edges: { source: string; target: string; label: string }[];
+}
+
+interface codeObject {
+  code_snippet: string;
+  code_explanation: string;
 }
 
 // --- SpeechRecognition type shim (not in lib.dom.d.ts) ---
@@ -147,7 +162,7 @@ const ZeroState = ({ onSelect }: { onSelect: (text: string) => void }) => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 pointer-events-auto">
           {suggestions.map((item, i) => (
-            <button key={i} onClick={() => onSelect(item.prompt)} className="group relative p-6 rounded-2xl border border-white/10 bg-black/40 backdrop-blur-md hover:bg-blue-900/20 hover:border-blue-500/50 transition-all text-left hover:-translate-y-2 shadow-2xl overflow-hidden">
+            <button key={i} onClick={() => onSelect(item.prompt)} className="focus-ring group relative p-6 rounded-2xl border border-white/10 bg-black/40 backdrop-blur-md hover:bg-blue-900/20 hover:border-blue-500/50 transition-all text-left hover:-translate-y-2 shadow-2xl overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-b from-blue-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
               <div className="relative z-10 mb-4 p-3 w-fit rounded-lg bg-white/5 text-blue-400 group-hover:bg-blue-500 group-hover:text-white transition-colors">
                   <item.icon size={24} />
@@ -166,12 +181,13 @@ function EditorContent({ onBack }: EditorProps) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [prompt, setPrompt] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [activeTab, setActiveTab] = useState<'ANALYSIS' | 'CODE' | 'CHAT'>('ANALYSIS');
   const [copied, setCopied] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [codeLanguage, setCodeLanguage] = useState('Python');
+  const [showLanguageDropDown, setshowLanguageDropDown] = useState(false);
   const [isRegeneratingCode, setIsRegeneratingCode] = useState(false);
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', text: string}[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -186,6 +202,7 @@ function EditorContent({ onBack }: EditorProps) {
     onRetry?: () => void;
   } | null>(null);
 
+  const codeCache = useRef(new Map<string, codeObject>());
   const reactFlowWrapper = useRef(null);
   const fileInputRef = useRef<HTMLInputElement>(null); 
   const { getNodes } = useReactFlow(); 
@@ -197,14 +214,15 @@ function EditorContent({ onBack }: EditorProps) {
 
 
   const generateGraph = async (text: string) => {
-    if (!text) return;
-    setLoading(true);
+    if (!text || isGenerating) return;
+    setIsGenerating(true);
     setPrompt(text);
     setGraphData(null);
     setActiveTab('ANALYSIS'); 
     setCodeLanguage('Python');
     setChatHistory([]);
     setIsSidebarOpen(false);
+    setshowLanguageDropDown(false);
 
     console.log("🚀 [FRONTEND] Connecting to Backend at:", BACKEND_URL);
 
@@ -259,6 +277,8 @@ function EditorContent({ onBack }: EditorProps) {
       console.log("✅ [SUCCESS] Data received:", data);
       
       setGraphData(data);
+      codeCache.current.clear();
+      codeCache.current.set(codeLanguage, {code_snippet: data.code_snippet ?? '', code_explanation: data.code_explanation ?? ''});
       
       const rawNodes: Node[] = data.nodes.map((n: { id: string; label: string }) => ({
         id: n.id, type: 'default', data: { label: n.label }, position: { x: 0, y: 0 },
@@ -289,12 +309,11 @@ function EditorContent({ onBack }: EditorProps) {
         onRetry: () => generateGraph(text)
       });
     } finally {
-      setLoading(false);
+      setIsGenerating(false);
     }
   };
 
-  const handleLanguageChange = async (newLang: string) => {
-    if (newLang === codeLanguage || !graphData) return;
+  const regenerateCode = async (newLang: string) => {
     setCodeLanguage(newLang);
     setIsRegeneratingCode(true);
     try {
@@ -415,14 +434,14 @@ function EditorContent({ onBack }: EditorProps) {
       </div>
 
       <div className="absolute inset-0 bg-slate-950/20 pointer-events-none z-0" />
-      {loading && <LoadingCore />}
+      {isGenerating && <LoadingOverlay />}
 
       {/* 4. MAIN UI LAYER */}
       <div className="relative flex-1 h-full flex flex-col z-10" ref={reactFlowWrapper}>
         
         {/* TOP BAR */}
         <div className="absolute top-0 left-0 w-full p-6 z-40 flex justify-between items-center pointer-events-none">
-          <button onClick={onBack} className="pointer-events-auto flex items-center gap-2 text-slate-400 hover:text-white transition-colors px-4 py-2 rounded-full hover:bg-white/10 backdrop-blur-md border border-white/5 hover:border-white/20">
+          <button onClick={onBack} className="focus-ring pointer-events-auto flex items-center gap-2 text-slate-400 hover:text-white transition-colors px-4 py-2 rounded-full hover:bg-white/10 backdrop-blur-md border border-white/5 hover:border-white/20">
             <ArrowLeft className="w-4 h-4" /> <span className="font-mono text-xs tracking-widest">TERMINAL</span>
           </button>
           
@@ -434,7 +453,7 @@ function EditorContent({ onBack }: EditorProps) {
              {graphData && (
                  <button 
                     onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
-                    className="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/80 backdrop-blur-md border border-white/10 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-all shadow-lg"
+                    className="focus-ring flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/80 backdrop-blur-md border border-white/10 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-all shadow-lg"
                  >
                     {isSidebarOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
                     {isSidebarOpen ? 'CLOSE PANEL' : 'OPEN PANEL'}
@@ -443,8 +462,8 @@ function EditorContent({ onBack }: EditorProps) {
           </div>
         </div>
 
-        {nodes.length === 0 && !loading && <ZeroState onSelect={generateGraph} />}
-        {nodes.length === 0 && !loading && <SystemLogs />}
+        {nodes.length === 0 && !isGenerating && <ZeroState onSelect={generateGraph} />}
+        {nodes.length === 0 && !isGenerating && <SystemLogs />}
 
         {/* MAIN GRAPH AREA */}
         <div className="flex-1 w-full h-full">
@@ -462,16 +481,16 @@ function EditorContent({ onBack }: EditorProps) {
                 <input type="text" placeholder="Describe a system..." value={prompt} onChange={(e) => setPrompt(e.target.value)} className="flex-1 bg-transparent text-white placeholder-slate-500 text-sm font-medium outline-none font-mono"/>
                 
                 <input type="file" ref={fileInputRef} className="hidden" accept=".txt,.json,.js,.py" onChange={handleFileUpload} />
-                <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors" title="Upload Problem File">
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="focus-ring p-2 rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors" title="Upload Problem File" aria-label="Upload problem file">
                     <Paperclip size={18} />
                 </button>
 
-                <button type="button" onClick={startListening} className={`p-2 rounded-full transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'text-slate-400 hover:text-white hover:bg-white/10'}`}>
+                <button type="button" onClick={startListening} aria-label={isListening ? 'Stop voice input' : 'Start voice input'} className={`focus-ring p-2 rounded-full transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'text-slate-400 hover:text-white hover:bg-white/10'}`}>
                     <Mic size={18} />
                 </button>
 
-                <button type="submit" disabled={loading} className="px-6 py-2 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs tracking-widest transition-all shadow-lg shadow-blue-500/20">
-                    {loading ? <span className="animate-pulse">PROCESSING</span> : "GENERATE"}
+                <button type="submit" disabled={isGenerating} className="px-6 py-2 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs tracking-widest transition-all shadow-lg shadow-blue-500/20">
+                    {isGenerating ? <span className="animate-pulse">PROCESSING</span> : "GENERATE"}
                 </button>
             </form>
         </div>
@@ -489,15 +508,15 @@ function EditorContent({ onBack }: EditorProps) {
                    <div className="flex items-center gap-2 mb-2 text-xs font-bold tracking-widest text-blue-500 uppercase"><Layers size={12} /> Analysis Complete</div>
                    <h2 className="text-xl font-bold text-white leading-tight">{graphData.title}</h2>
                 </div>
-                <button onClick={handleExport} className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors" title="Export Image">
+                <button onClick={handleExport} className="focus-ring p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors" title="Export as PNG" aria-label="Export graph as PNG">
                     <Download size={18} />
                 </button>
             </div>
 
             <div className="flex border-b border-white/10 min-w-[450px]">
-                <button onClick={() => setActiveTab('ANALYSIS')} className={`flex-1 py-3 text-xs font-bold tracking-wider hover:bg-white/5 transition-colors ${activeTab === 'ANALYSIS' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-slate-500'}`}>ANALYSIS</button>
-                <button onClick={() => setActiveTab('CODE')} className={`flex-1 py-3 text-xs font-bold tracking-wider hover:bg-white/5 transition-colors flex items-center justify-center gap-2 ${activeTab === 'CODE' ? 'text-emerald-400 border-b-2 border-emerald-400' : 'text-slate-500'}`}><Code size={14} /> CODE</button>
-                <button onClick={() => setActiveTab('CHAT')} className={`flex-1 py-3 text-xs font-bold tracking-wider hover:bg-white/5 transition-colors flex items-center justify-center gap-2 ${activeTab === 'CHAT' ? 'text-purple-400 border-b-2 border-purple-400' : 'text-slate-500'}`}><MessageSquare size={14} /> AI TUTOR</button>
+                <button onClick={() => setActiveTab('ANALYSIS')} className={`focus-ring flex-1 py-3 text-xs font-bold tracking-wider hover:bg-white/5 transition-colors ${activeTab === 'ANALYSIS' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-slate-500'}`}>ANALYSIS</button>
+                <button onClick={() => setActiveTab('CODE')} className={`focus-ring flex-1 py-3 text-xs font-bold tracking-wider hover:bg-white/5 transition-colors flex items-center justify-center gap-2 ${activeTab === 'CODE' ? 'text-emerald-400 border-b-2 border-emerald-400' : 'text-slate-500'}`}><Code size={14} /> CODE</button>
+                <button onClick={() => setActiveTab('CHAT')} className={`focus-ring flex-1 py-3 text-xs font-bold tracking-wider hover:bg-white/5 transition-colors flex items-center justify-center gap-2 ${activeTab === 'CHAT' ? 'text-purple-400 border-b-2 border-purple-400' : 'text-slate-500'}`}><MessageSquare size={14} /> AI TUTOR</button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6 min-w-[450px]">
@@ -528,19 +547,47 @@ function EditorContent({ onBack }: EditorProps) {
                 {activeTab === 'CODE' && (
                   <div className="h-full flex flex-col">
                     <div className="flex justify-between items-center mb-4">
-                      <div className="relative group">
-                          <button className="flex items-center gap-2 text-xs font-bold text-white bg-slate-800 px-3 py-1.5 rounded-lg border border-white/10 hover:border-blue-500/50 transition-colors">
-                              {codeLanguage} <ChevronDown size={12} />
+                      <div className="relative flex gap-2">
+                        <div className="">
+                        <button className={`focus-ring flex items-center gap-2 text-xs font-bold text-white bg-slate-800 px-3 py-1.5 rounded-lg border border-white/10 hover:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-all ${isRegeneratingCode? 'opacity-50':'opacity-100'}`}
+                          onClick={() => setshowLanguageDropDown(p => !p)}
+                          disabled={isRegeneratingCode}
+                        >
+                          {codeLanguage} 
+                          <ChevronDown size={12} className={`transition-transform ${showLanguageDropDown ? 'rotate-180' : ''}`} />
                           </button>
-                          <div className="absolute top-full left-0 mt-2 w-32 bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden hidden group-hover:block z-50">
+                        {showLanguageDropDown && (
+                          <>
+                            <div 
+                              className="fixed inset-0 z-40" 
+                              onClick={() => setshowLanguageDropDown(false)} 
+                            />
+                            
+                            <div className="absolute top-full left-0 mt-2 w-32 bg-slate-900 border border-slate-700 rounded-lg shadow-xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100">
                               {['Python', 'JavaScript', 'C++', 'Java'].map(lang => (
-                                  <button key={lang} onClick={() => handleLanguageChange(lang)} className="w-full text-left px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors">
+                                <button 
+                                  key={lang} 
+                                  onClick={() => handleLanguageChange(lang)} 
+                                  className="focus-ring w-full text-left px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors first:border-b-0"
+                                >
                                       {lang}
                                   </button>
                               ))}
                           </div>
+                          </>
+                        )}
                       </div>
-                      <button onClick={handleCopyCode} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-colors">
+                            <button
+                              className={`focus-ring flex items-center gap-2 text-xs font-bold text-white bg-slate-800 px-3 py-1.5 rounded-lg border border-white/10 hover:border-blue-500/50 transition-colors ${isRegeneratingCode? 'opacity-50': 'opacity-100'}`}
+                              disabled={isRegeneratingCode}
+                              onClick={() => regenerateCode(codeLanguage)}
+                              aria-label="Regenerate code"
+                              title="Regenerate code"
+                            >
+                              <RefreshCw size={14}/>
+                            </button>
+                      </div>
+                      <button onClick={handleCopyCode} className="focus-ring flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-colors">
                         {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'COPIED' : 'COPY'}
                       </button>
                     </div>
@@ -585,9 +632,9 @@ function EditorContent({ onBack }: EditorProps) {
                                 placeholder="Type your question..." 
                                 value={chatInput}
                                 onChange={(e) => setChatInput(e.target.value)}
-                                className="w-full bg-slate-900/50 border border-white/10 rounded-lg pl-4 pr-10 py-3 text-xs text-white focus:border-blue-500 outline-none"
+                                className="focus-ring w-full bg-slate-900/50 border border-white/10 rounded-lg pl-4 pr-10 py-3 text-xs text-white focus:border-blue-500 outline-none"
                             />
-                            <button type="submit" disabled={isChatting} className="absolute right-2 top-6 text-blue-400 hover:text-white transition-colors">
+                            <button type="submit" disabled={isChatting} aria-label="Send message" className="focus-ring absolute right-2 top-6 text-blue-400 hover:text-white transition-colors">
                                 <Send size={16} />
                             </button>
                         </form>

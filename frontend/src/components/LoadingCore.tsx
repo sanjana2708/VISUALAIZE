@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Sphere, MeshDistortMaterial, Html, Torus } from '@react-three/drei';
 import * as THREE from 'three';
@@ -65,15 +65,39 @@ function ProcessingUnit() {
 }
 
 export default function LoadingCore() {
+
+  const loadingMessages = [
+    "Analyzing repository structure...",
+    "Generating dependency graph...",
+    "Optimizing visualization...",
+    "Rendering components...",
+    "Finalizing output..."
+  ];
+
+  const [currentMessage, setCurrentMessage] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentMessage((prev) => (prev + 1) % loadingMessages.length);
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-500">
-      <div className="w-full h-full max-w-2xl max-h-[600px]">
+      <div className="relative w-full h-full max-w-2xl max-h-[600px]">
         <Canvas camera={{ position: [0, 0, 6] }}>
             <ambientLight intensity={0.5} />
             <pointLight position={[10, 10, 10]} intensity={2} color="#60a5fa" />
             <pointLight position={[-10, -10, -10]} intensity={2} color="#a855f7" />
             <ProcessingUnit />
         </Canvas>
+        <div className="absolute bottom- 10 left-1/2 -translate-x-1/2 text-center">
+  <p className="text-blue-300 font-mono text-sm tracking-wider animate-pulse">
+    {loadingMessages[currentMessage]}
+  </p>
+</div>
       </div>
     </div>
   );
