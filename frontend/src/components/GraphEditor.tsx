@@ -13,11 +13,12 @@ import {
   ArrowLeft, Box, GitBranch, Network, Share2, Terminal, 
   Activity, BookOpen, PlayCircle, Layers, Code, Copy, Check, Zap, 
   Globe, Mic, Download, ChevronDown, MessageSquare, Send, Paperclip, 
-  PanelRightClose, PanelRightOpen 
+  PanelRightClose, PanelRightOpen, AlertTriangle, ArrowRight, X 
 } from 'lucide-react';
 import CustomNode from '../components/CustomNode';
 import LoadingCore from './LoadingCore'; 
 import HolographicScene from './HolographicScene';
+import ErrorModal from './ErrorModal';
 
 interface EditorProps { onBack: () => void; }
 
@@ -54,7 +55,7 @@ interface WindowWithSpeech extends Window {
 
 // --- 🔧 CONFIGURATION: SINGLE SOURCE OF TRUTH ---
 // This ensures we ALWAYS talk to Render, avoiding localhost confusion.
-const BACKEND_URL = "https://visualaize-backend.onrender.com"; 
+const BACKEND_URL = "http://localhost:8000"; 
 
 // --- FIXED CSS FOR GLASS BUTTONS ---
 const glassControlsStyle = `
@@ -177,6 +178,13 @@ function EditorContent({ onBack }: EditorProps) {
   const [isChatting, setIsChatting] = useState(false);
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [errorState, setErrorState] = useState<{
+    show: boolean;
+    title: string;
+    message: string;
+    type: 'missing_key' | 'invalid_key' | 'rate_limit' | 'bad_request' | 'generic';
+    onRetry?: () => void;
+  } | null>(null);
 
   const reactFlowWrapper = useRef(null);
   const fileInputRef = useRef<HTMLInputElement>(null); 
@@ -185,6 +193,8 @@ function EditorContent({ onBack }: EditorProps) {
   const nodeTypes = useMemo(() => ({ default: CustomNode, input: CustomNode, output: CustomNode }), []);
   const onNodesChange: OnNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange: OnEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
+
+
 
   const generateGraph = async (text: string) => {
     if (!text) return;
@@ -206,9 +216,43 @@ function EditorContent({ onBack }: EditorProps) {
       });
       
       if (!res.ok) {
-        const errText = await res.text();
-        console.error("❌ [BACKEND ERROR]:", res.status, errText);
-        throw new Error(`Server Error (${res.status}): ${errText}`);
+        let errDetail = "";
+        try {
+          const errJson = await res.json();
+          errDetail = errJson.detail || "";
+        } catch {
+          errDetail = await res.text();
+        }
+        
+        console.error("❌ [BACKEND ERROR]:", res.status, errDetail);
+
+        let errorTitle = "System Error";
+        let errorMsg = "An unexpected error occurred. Please try again.";
+        let errorType: 'missing_key' | 'invalid_key' | 'rate_limit' | 'bad_request' | 'generic' = 'generic';
+
+        if (errDetail.includes("GEMINI_API_KEY_MISSING") || (res.status === 401 && errDetail.toLowerCase().includes("missing"))) {
+          errorTitle = "API Key Missing";
+          errorMsg = "Please configure your Gemini API key in the backend .env file.";
+          errorType = "missing_key";
+        } else if (errDetail.includes("GEMINI_API_KEY_INVALID") || res.status === 403 || res.status === 401) {
+          errorTitle = "Invalid API Key";
+          errorMsg = "Please check your Gemini API key configuration. The current key is invalid or unauthorized.";
+          errorType = "invalid_key";
+        } else if (errDetail.includes("GEMINI_RATE_LIMIT_EXCEEDED") || res.status === 429) {
+          errorTitle = "Rate Limit Exceeded";
+          errorMsg = "Gemini API rate limit or quota exceeded. Please wait a moment and try again.";
+          errorType = "rate_limit";
+        } else if (errDetail.includes("GEMINI_BAD_REQUEST") || res.status === 400) {
+          errorTitle = "Invalid Request";
+          errorMsg = errDetail.replace("GEMINI_BAD_REQUEST: ", "") || "The AI model could not process this request.";
+          errorType = "bad_request";
+        } else {
+          errorTitle = "Model Execution Failure";
+          errorMsg = errDetail || "The models failed to process the request.";
+          errorType = "generic";
+        }
+
+        throw { title: errorTitle, message: errorMsg, type: errorType };
       }
       
       const data = await res.json();
@@ -231,9 +275,19 @@ function EditorContent({ onBack }: EditorProps) {
       setEdges(layoutedEdges);
       setIsSidebarOpen(true); 
 
-    } catch (err) {
+    } catch (err: any) {
       console.error("🚨 [CRITICAL ERROR]:", err);
-      alert(`System Busy. Please check the console for the exact error.\n\nDetails: ${err}`);
+      const title = err.title || "Connection Failed";
+      const message = err.message || `Could not connect to the visualization server. Details: ${err}`;
+      const type = err.type || "generic";
+
+      setErrorState({
+        show: true,
+        title,
+        message,
+        type,
+        onRetry: () => generateGraph(text)
+      });
     } finally {
       setLoading(false);
     }
@@ -247,9 +301,49 @@ function EditorContent({ onBack }: EditorProps) {
       const res = await fetch(`${BACKEND_URL}/regenerate_code`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt, language: newLang }),
       });
+      if (!res.ok) {
+        let errDetail = "";
+        try {
+          const errJson = await res.json();
+          errDetail = errJson.detail || "";
+        } catch {
+          errDetail = await res.text();
+        }
+        
+        let errorTitle = "System Error";
+        let errorMsg = "Failed to rewrite code.";
+        let errorType: 'missing_key' | 'invalid_key' | 'rate_limit' | 'bad_request' | 'generic' = 'generic';
+
+        if (errDetail.includes("GEMINI_API_KEY_MISSING") || (res.status === 401 && errDetail.toLowerCase().includes("missing"))) {
+          errorTitle = "API Key Missing";
+          errorMsg = "Please configure your Gemini API key in the backend .env file.";
+          errorType = "missing_key";
+        } else if (errDetail.includes("GEMINI_API_KEY_INVALID") || res.status === 403 || res.status === 401) {
+          errorTitle = "Invalid API Key";
+          errorMsg = "Please check your Gemini API key configuration. The current key is invalid or unauthorized.";
+          errorType = "invalid_key";
+        } else if (errDetail.includes("GEMINI_RATE_LIMIT_EXCEEDED") || res.status === 429) {
+          errorTitle = "Rate Limit Exceeded";
+          errorMsg = "Gemini API rate limit or quota exceeded. Please wait a moment and try again.";
+          errorType = "rate_limit";
+        }
+
+        throw { title: errorTitle, message: errorMsg, type: errorType };
+      }
       const data = await res.json();
       setGraphData((prev: GraphData | null) => prev ? ({ ...prev, code_snippet: data.code_snippet, code_explanation: data.code_explanation }) : prev);
-    } catch (err) { alert("Failed to rewrite code."); } finally { setIsRegeneratingCode(false); }
+    } catch (err: any) { 
+      const title = err.title || "Rewriting Failed";
+      const message = err.message || "Failed to rewrite code.";
+      const type = err.type || "generic";
+      setErrorState({
+        show: true,
+        title,
+        message,
+        type,
+        onRetry: () => handleLanguageChange(newLang)
+      });
+    } finally { setIsRegeneratingCode(false); }
   };
 
   const handleChatSubmit = async (e: React.FormEvent) => {
@@ -511,6 +605,20 @@ function EditorContent({ onBack }: EditorProps) {
             </>
         )}
       </div>
+      {errorState && (
+        <ErrorModal 
+          show={errorState.show}
+          title={errorState.title}
+          message={errorState.message}
+          type={errorState.type}
+          onRetry={() => {
+            const retryFn = errorState.onRetry;
+            setErrorState(null);
+            if (retryFn) retryFn();
+          }}
+          onClose={() => setErrorState(null)} 
+        />
+      )}
     </div>
   );
 }
