@@ -55,7 +55,7 @@ interface WindowWithSpeech extends Window {
 
 // --- 🔧 CONFIGURATION: SINGLE SOURCE OF TRUTH ---
 // This ensures we ALWAYS talk to Render, avoiding localhost confusion.
-const BACKEND_URL = "http://localhost:8000"; 
+const BACKEND_URL = "https://visualaize-backend.onrender.com";
 
 // --- FIXED CSS FOR GLASS BUTTONS ---
 const glassControlsStyle = `
