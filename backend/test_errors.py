@@ -1,3 +1,10 @@
+"""
+Unit tests for backend exception handling and validation logic in main.py.
+Tested Scenarios:
+1. Missing API Key: Validates 401 response with GEMINI_API_KEY_MISSING.
+2. Invalid API Key: Validates 401 response with GEMINI_API_KEY_INVALID.
+3. Quota/Rate Limits: Validates 429 response with GEMINI_RATE_LIMIT_EXCEEDED.
+"""
 import sys
 from unittest.mock import patch, MagicMock
 from google.api_core import exceptions as google_exceptions
