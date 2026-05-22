@@ -12,6 +12,7 @@ from fastapi import HTTPException
 import pytest
 
 def test_missing_api_key():
+    """Test that a missing Gemini API key raises a 401 HTTPException with GEMINI_API_KEY_MISSING."""
     # Force GENAI_KEY to be empty/missing
     with patch("main.GENAI_KEY", None):
         with pytest.raises(HTTPException) as exc_info:
@@ -20,6 +21,7 @@ def test_missing_api_key():
         assert "GEMINI_API_KEY_MISSING" in exc_info.value.detail
 
 def test_invalid_api_key():
+    """Test that an invalid Gemini API key raises a 401 HTTPException with GEMINI_API_KEY_INVALID."""
     # Force GENAI_KEY to be set
     with patch("main.GENAI_KEY", "some_key"):
         # Mock model content generation to raise Unauthenticated
@@ -33,6 +35,7 @@ def test_invalid_api_key():
             assert "GEMINI_API_KEY_INVALID" in exc_info.value.detail
 
 def test_rate_limit_exceeded():
+    """Test that rate limit exhaustion raises a 429 HTTPException with GEMINI_RATE_LIMIT_EXCEEDED."""
     with patch("main.GENAI_KEY", "some_key"):
         mock_model = MagicMock()
         mock_model.generate_content.side_effect = google_exceptions.ResourceExhausted("Rate limit exceeded")
