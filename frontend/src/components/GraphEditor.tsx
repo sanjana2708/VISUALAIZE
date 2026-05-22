@@ -7,7 +7,7 @@ import {
   ArrowLeft, Box, GitBranch, Network, Share2, Terminal, 
   Activity, BookOpen, PlayCircle, Layers, Code, Copy, Check, Zap, 
   Globe, Mic, Download, ChevronDown, MessageSquare, Send, Paperclip, 
-  PanelRightClose, PanelRightOpen, AlertTriangle, ArrowRight, X 
+  PanelRightClose, PanelRightOpen, AlertTriangle, ArrowRight, X, RefreshCw
 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
@@ -24,7 +24,6 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import CustomNode from '../components/CustomNode';
-import { getLayoutedElements } from '../utils/layout';
 import HolographicScene from './HolographicScene';
 import ErrorModal from './ErrorModal';
 import LoadingCore from './LoadingCore';
@@ -235,11 +234,12 @@ function EditorContent({ onBack }: EditorProps) {
       
       if (!res.ok) {
         let errDetail = "";
+        const bodyText = await res.text();
         try {
-          const errJson = await res.json();
-          errDetail = errJson.detail || "";
+          const errJson = JSON.parse(bodyText);
+          errDetail = errJson.detail || bodyText;
         } catch {
-          errDetail = await res.text();
+          errDetail = bodyText;
         }
         
         console.error("❌ [BACKEND ERROR]:", res.status, errDetail);
@@ -322,11 +322,12 @@ function EditorContent({ onBack }: EditorProps) {
       });
       if (!res.ok) {
         let errDetail = "";
+        const bodyText = await res.text();
         try {
-          const errJson = await res.json();
-          errDetail = errJson.detail || "";
+          const errJson = JSON.parse(bodyText);
+          errDetail = errJson.detail || bodyText;
         } catch {
-          errDetail = await res.text();
+          errDetail = bodyText;
         }
         
         let errorTitle = "System Error";
@@ -360,7 +361,7 @@ function EditorContent({ onBack }: EditorProps) {
         title,
         message,
         type,
-        onRetry: () => handleLanguageChange(newLang)
+        onRetry: () => regenerateCode(newLang)
       });
     } finally { setIsRegeneratingCode(false); }
   };
@@ -567,7 +568,7 @@ function EditorContent({ onBack }: EditorProps) {
                               {['Python', 'JavaScript', 'C++', 'Java'].map(lang => (
                                 <button 
                                   key={lang} 
-                                  onClick={() => handleLanguageChange(lang)} 
+                                  onClick={() => { regenerateCode(lang); setshowLanguageDropDown(false); }} 
                                   className="focus-ring w-full text-left px-4 py-2 text-xs text-slate-300 hover:bg-blue-600 hover:text-white transition-colors first:border-b-0"
                                 >
                                       {lang}
